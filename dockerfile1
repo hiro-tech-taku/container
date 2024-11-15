@@ -1,0 +1,24 @@
+#ベースのイメージを指定
+FROM ubuntu
+
+#timezone設定で固まらないように先に指定
+ENV TZ=Asia/Tokyo
+RUN ln -snf /usr/share/zoneinfo/$TZ /etc/localtime && echo $TZ > /etc/timezone
+
+#apt updateを実行
+RUN apt update
+
+#お好みでパッケージのインストール
+RUN apt install -y apache2 vim
+
+#"ServerName localhost"をfqdn.confに書き込む
+RUN echo "ServerName localhost" | tee /etc/apache2/conf-available/fqdn.conf
+
+#fqdn.confを有効化
+RUN a2enconf fqdn
+
+#apache2を自動起動したあとログイン
+ENTRYPOINT service apache2 start && /bin/bash --login
+
+#ローカルにあるindex.htmlをコンテナ内にコピーする
+COPY index.html /var/www/html
