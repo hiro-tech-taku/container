@@ -1,0 +1,72 @@
+# docker network create api-networkのこと
+networks:
+  api-network:
+
+volumes:
+  db-data:
+
+services:
+  db:
+    # docker pull mysql:latestのこと
+    image: mysql:latest 
+    # docker container run --name db-container --env MYSQL_ROOT_PASSWORD=hiroseと同じ          
+    container_name: db-container  
+    environment:                  
+      MYSQL_ROOT_PASSWORD: hirose
+    volumes:
+      - db-data:/var/lib/mysql    
+      - ./db/init.sql:/docker-entrypoint-initdb.d/init.sql:ro 
+    # docker network connect api-network db-containerと同じ
+    networks:                     
+      - api-network
+    # mysqladmin ping -h localhost -u root -phiroseと同じ
+    healthcheck:                  
+      test: ["CMD", "mysqladmin", "ping", "-h", "localhost", "-u", "root", "-phirose"]
+      interval: 10s               
+      timeout: 5s                 
+      retries: 3                  
+
+  api:
+    # docker image build -t api-image ./api と同じ
+    build: 
+      context: ./api              
+      dockerfile: Dockerfile      
+    # docker container run -p 8080:8080 /
+    # --name api-container /
+    # -e DB_USERNAME=root /
+    # -e DB_PASSWORD=hirose /
+    # -e DB_SERVERNAME=db-container と同じ
+    container_name: api-container 
+    depends_on:
+      - db                        
+    environment:                  
+      - DB_USERNAME=root
+      - DB_PASSWORD=hirose
+      - DB_SERVERNAME=db-container
+    ports:                        
+      - "8080:8080"
+    # docker network connect api-network api-containerと同じ
+    networks:                     
+      - api-network
+    healthcheck:                  
+      # curl -f http://localhost:8080 と同じ
+      test: ["CMD", "curl", "-f", "http://localhost:8080"]
+      interval: 10s               
+      timeout: 5s                 
+      retries: 3                  
+
+  front:
+    build: 
+      # docker image build -t front-image ./frontと同じ
+      context: ./front
+      dockerfile: Dockerfile
+    # docker container run -p 8081:80 --name front-container front-image と同じ 
+    container_name: front-container
+    ports:
+      - "8081:80"
+    healthcheck:
+      # curl -f http://localhost:80 と同じ
+      test: ["CMD", "curl", "-f", "http://localhost:80"]
+      interval: 10s               
+      timeout: 5s                 
+      retries: 3                  
