@@ -1,0 +1,300 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Description: Zabbix Web (EC2), Zabbix Manager/Server (EC2), and Aurora PostgreSQL via CloudFormation. EC2 boots Docker and builds images from Dockerfiles, then runs containers.
+
+Parameters:
+  KeyName:
+    Type: AWS::EC2::KeyPair::KeyName
+    Description: Existing EC2 KeyPair name for SSH access
+  InstanceType:
+    Type: String
+    Default: t3.small
+    AllowedValues:
+      - t3.micro
+      - t3.small
+      - t3.medium
+      - t3.large
+      - t3a.micro
+      - t3a.small
+      - t3a.medium
+      - t3a.large
+    Description: EC2 instance type for Web/Server
+  DBName:
+    Type: String
+    Default: zabbix
+  DBUsername:
+    Type: String
+    Default: zabbix
+  DBPassword:
+    Type: String
+    NoEcho: true
+    MinLength: 12
+    Description: Aurora DB master password (min 12 chars)
+  CIDRForSSH:
+    Type: String
+    Default: 0.0.0.0/0
+    Description: IPv4 CIDR allowed to SSH to instances (limit in production)
+
+Mappings:
+  AmiMap:
+    # Use SSM public parameter for Amazon Linux 2
+    AL2:
+      Id: "{{resolve:ssm:/aws/service/ami-amazon-linux-latest/amzn2-ami-hvm-x86_64-gp2}}"
+
+Resources:
+  VPC:
+    Type: AWS::EC2::VPC
+    Properties:
+      CidrBlock: 10.20.0.0/16
+      EnableDnsSupport: true
+      EnableDnsHostnames: true
+      Tags:
+        - Key: Name
+          Value: zbx-vpc
+
+  IGW:
+    Type: AWS::EC2::InternetGateway
+
+  AttachIgw:
+    Type: AWS::EC2::VPCGatewayAttachment
+    Properties:
+      VpcId: !Ref VPC
+      InternetGatewayId: !Ref IGW
+
+  SubnetA:
+    Type: AWS::EC2::Subnet
+    Properties:
+      VpcId: !Ref VPC
+      CidrBlock: 10.20.1.0/24
+      MapPublicIpOnLaunch: true
+      AvailabilityZone: !Select [0, !GetAZs '']
+      Tags:
+        - Key: Name
+          Value: zbx-public-a
+
+  SubnetB:
+    Type: AWS::EC2::Subnet
+    Properties:
+      VpcId: !Ref VPC
+      CidrBlock: 10.20.2.0/24
+      MapPublicIpOnLaunch: true
+      AvailabilityZone: !Select [1, !GetAZs '']
+      Tags:
+        - Key: Name
+          Value: zbx-public-b
+
+  RouteTable:
+    Type: AWS::EC2::RouteTable
+    Properties:
+      VpcId: !Ref VPC
+
+  DefaultRoute:
+    Type: AWS::EC2::Route
+    Properties:
+      RouteTableId: !Ref RouteTable
+      DestinationCidrBlock: 0.0.0.0/0
+      GatewayId: !Ref IGW
+
+  AssocA:
+    Type: AWS::EC2::SubnetRouteTableAssociation
+    Properties:
+      SubnetId: !Ref SubnetA
+      RouteTableId: !Ref RouteTable
+
+  AssocB:
+    Type: AWS::EC2::SubnetRouteTableAssociation
+    Properties:
+      SubnetId: !Ref SubnetB
+      RouteTableId: !Ref RouteTable
+
+  WebSG:
+    Type: AWS::EC2::SecurityGroup
+    Properties:
+      GroupDescription: Allow HTTP/HTTPS/SSH
+      VpcId: !Ref VPC
+      SecurityGroupIngress:
+        - IpProtocol: tcp
+          FromPort: 80
+          ToPort: 80
+          CidrIp: 0.0.0.0/0
+        - IpProtocol: tcp
+          FromPort: 443
+          ToPort: 443
+          CidrIp: 0.0.0.0/0
+        - IpProtocol: tcp
+          FromPort: 22
+          ToPort: 22
+          CidrIp: !Ref CIDRForSSH
+      SecurityGroupEgress:
+        - IpProtocol: -1
+          FromPort: 0
+          ToPort: 0
+          CidrIp: 0.0.0.0/0
+      Tags:
+        - Key: Name
+          Value: zbx-web-sg
+
+  ServerSG:
+    Type: AWS::EC2::SecurityGroup
+    Properties:
+      GroupDescription: Allow Zabbix server port and SSH
+      VpcId: !Ref VPC
+      SecurityGroupIngress:
+        - IpProtocol: tcp
+          FromPort: 10051
+          ToPort: 10051
+          CidrIp: 0.0.0.0/0
+        - IpProtocol: tcp
+          FromPort: 22
+          ToPort: 22
+          CidrIp: !Ref CIDRForSSH
+      SecurityGroupEgress:
+        - IpProtocol: -1
+          FromPort: 0
+          ToPort: 0
+          CidrIp: 0.0.0.0/0
+      Tags:
+        - Key: Name
+          Value: zbx-srv-sg
+
+  DBSG:
+    Type: AWS::EC2::SecurityGroup
+    Properties:
+      GroupDescription: Allow PostgreSQL from web/server
+      VpcId: !Ref VPC
+      SecurityGroupIngress:
+        - IpProtocol: tcp
+          FromPort: 5432
+          ToPort: 5432
+          SourceSecurityGroupId: !Ref WebSG
+        - IpProtocol: tcp
+          FromPort: 5432
+          ToPort: 5432
+          SourceSecurityGroupId: !Ref ServerSG
+      SecurityGroupEgress:
+        - IpProtocol: -1
+          FromPort: 0
+          ToPort: 0
+          CidrIp: 0.0.0.0/0
+      Tags:
+        - Key: Name
+          Value: zbx-db-sg
+
+  DBSubnets:
+    Type: AWS::RDS::DBSubnetGroup
+    Properties:
+      DBSubnetGroupDescription: Zabbix Aurora subnets
+      SubnetIds:
+        - !Ref SubnetA
+        - !Ref SubnetB
+      DBSubnetGroupName: zbx-db-subnets
+
+  AuroraCluster:
+    Type: AWS::RDS::DBCluster
+    Properties:
+      Engine: aurora-postgresql
+      EngineMode: provisioned
+      DatabaseName: !Ref DBName
+      MasterUsername: !Ref DBUsername
+      MasterUserPassword: !Ref DBPassword
+      DBSubnetGroupName: !Ref DBSubnets
+      VpcSecurityGroupIds:
+        - !Ref DBSG
+
+  AuroraInstance1:
+    Type: AWS::RDS::DBInstance
+    Properties:
+      DBClusterIdentifier: !Ref AuroraCluster
+      DBInstanceClass: db.t3.medium
+      Engine: aurora-postgresql
+      PubliclyAccessible: true
+
+  ZabbixServer:
+    Type: AWS::EC2::Instance
+    Properties:
+      ImageId: !FindInMap [AmiMap, AL2, Id]
+      InstanceType: !Ref InstanceType
+      KeyName: !Ref KeyName
+      SubnetId: !Ref SubnetA
+      SecurityGroupIds:
+        - !Ref ServerSG
+      Tags:
+        - Key: Name
+          Value: zbx-server
+      UserData:
+        Fn::Base64:
+          Fn::Sub: |
+            #!/bin/bash -xe
+            yum update -y
+            amazon-linux-extras install docker -y || yum install -y docker
+            systemctl enable docker
+            systemctl start docker
+
+            mkdir -p /opt/zabbix/server
+            cat > /opt/zabbix/server/Dockerfile << 'EOF'
+            FROM zabbix/zabbix-server-pgsql:alpine-latest
+            ENV TZ=Asia/Tokyo
+            EXPOSE 10051
+            EOF
+
+            docker build -t zbx-server /opt/zabbix/server
+
+            docker run -d --name zabbix-server --restart unless-stopped \
+              -e DB_SERVER_HOST=${AuroraCluster.Endpoint.Address} \
+              -e POSTGRES_USER=${DBUsername} \
+              -e POSTGRES_PASSWORD=${DBPassword} \
+              -e POSTGRES_DB=${DBName} \
+              -e TZ=Asia/Tokyo \
+              -p 10051:10051 \
+              zbx-server
+
+  ZabbixWeb:
+    Type: AWS::EC2::Instance
+    Properties:
+      ImageId: !FindInMap [AmiMap, AL2, Id]
+      InstanceType: !Ref InstanceType
+      KeyName: !Ref KeyName
+      SubnetId: !Ref SubnetB
+      SecurityGroupIds:
+        - !Ref WebSG
+      Tags:
+        - Key: Name
+          Value: zbx-web
+      UserData:
+        Fn::Base64:
+          Fn::Sub: |
+            #!/bin/bash -xe
+            yum update -y
+            amazon-linux-extras install docker -y || yum install -y docker
+            systemctl enable docker
+            systemctl start docker
+
+            mkdir -p /opt/zabbix/web
+            cat > /opt/zabbix/web/Dockerfile << 'EOF'
+            FROM zabbix/zabbix-web-nginx-pgsql:alpine-latest
+            ENV PHP_TZ=Asia/Tokyo
+            EXPOSE 8080
+            EOF
+
+            docker build -t zbx-web /opt/zabbix/web
+
+            docker run -d --name zabbix-web --restart unless-stopped \
+              -e DB_SERVER_HOST=${AuroraCluster.Endpoint.Address} \
+              -e POSTGRES_USER=${DBUsername} \
+              -e POSTGRES_PASSWORD=${DBPassword} \
+              -e POSTGRES_DB=${DBName} \
+              -e PHP_TZ=Asia/Tokyo \
+              -e ZBX_SERVER_HOST=${ZabbixServer.PrivateIp} \
+              -p 80:8080 \
+              zbx-web
+
+Outputs:
+  WebPublicIP:
+    Description: Public IP of Zabbix Web EC2
+    Value: !GetAtt ZabbixWeb.PublicIp
+  ServerPublicIP:
+    Description: Public IP of Zabbix Server EC2
+    Value: !GetAtt ZabbixServer.PublicIp
+  AuroraEndpoint:
+    Description: Aurora cluster endpoint
+    Value: !GetAtt AuroraCluster.Endpoint.Address
+

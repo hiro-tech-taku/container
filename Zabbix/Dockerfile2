@@ -1,0 +1,25 @@
+# Infra helper image to provision AWS resources for Zabbix (EC2 + Aurora)
+# - Includes AWS CLI v2 and Terraform
+# - Intended to be used with a mounted infra directory containing Terraform code
+
+FROM amazon/aws-cli:2.17.0
+
+ARG TF_VERSION=1.7.5
+
+RUN yum update -y \
+    && yum install -y curl unzip tar less shadow-utils procps \
+    && curl -fsSL "https://releases.hashicorp.com/terraform/${TF_VERSION}/terraform_${TF_VERSION}_linux_amd64.zip" -o /tmp/terraform.zip \
+    && unzip /tmp/terraform.zip -d /usr/local/bin \
+    && rm -f /tmp/terraform.zip \
+    && terraform -version \
+    && aws --version \
+    && yum clean all && rm -rf /var/cache/yum
+
+WORKDIR /workspace
+
+ENV AWS_REGION=ap-northeast-1 \
+    TF_IN_AUTOMATION=1
+
+# Default message; override with your own command (e.g., `terraform init`)
+CMD ["/bin/sh", "-lc", "terraform --version && aws --version && echo 'Mount your Terraform dir to /workspace and run: terraform init && terraform apply'" ]
+
