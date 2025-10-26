@@ -8,6 +8,11 @@ LISTEN_ADDRESSES="${LISTEN_ADDRESSES:-udp:0.0.0.0:162}"
 TRAP_COMMUNITY="${TRAP_COMMUNITY:-public}"
 TRAP_SOURCE="${TRAP_SOURCE:-}"
 DISABLE_AUTH="${DISABLE_AUTH:-no}"
+ZBX_SERVER="${ZBX_SERVER:-}"
+ZBX_PORT="${ZBX_PORT:-10051}"
+ZBX_HOST="${ZBX_HOST:-}"
+ZBX_KEY="${ZBX_KEY:-snmptrap}"
+ZBX_FORWARD="${ZBX_FORWARD:-auto}"
 
 CONF_PATH="/etc/snmp/snmptrapd.conf"
 
@@ -30,8 +35,14 @@ if [ ! -f "$CONF_PATH" ] || [ "${OVERRIDE_CONFIG:-}" = "true" ]; then
         echo "$line"
       fi
     fi
+    # If Zabbix forwarding is enabled, hook traphandle
+    # ZBX_FORWARD=auto (default): enable when ZBX_SERVER is set
+    # ZBX_FORWARD=yes: force enable; no: disable
+    if [ "${ZBX_FORWARD}" = "yes" ] || { [ "${ZBX_FORWARD}" = "auto" ] && [ -n "${ZBX_SERVER}" ]; }; then
+      echo "# Forward all traps to Zabbix via zabbix_sender"
+      echo "traphandle default /usr/local/bin/zbx-trap-forwarder.sh"
+    fi
   } > "$CONF_PATH"
 fi
 
 exec "$@"
-

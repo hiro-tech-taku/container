@@ -1,0 +1,20 @@
+FROM zabbix/zabbix-appliance:latest
+
+# Simple all-in-one Zabbix (server+web+DB) for local testing
+# Exposes HTTP 80 and Zabbix server 10051
+
+ENV ZBX_DEFAULT_ADMIN_USER=Admin \
+    ZBX_DEFAULT_ADMIN_PASS=zabbix \
+    ZBX_INIT_HOST=snmptrap-source \
+    ZBX_INIT_ITEM_KEY=snmptrap \
+    TZ=UTC
+
+COPY zbx-api-init.sh /usr/local/bin/zbx-api-init.sh
+RUN chmod +x /usr/local/bin/zbx-api-init.sh
+
+EXPOSE 80 10051
+
+# Note: We do not override the appliance entrypoint/CMD.
+# After container is up, run the init script via docker exec:
+#   docker exec zabbix-manager /usr/local/bin/zbx-api-init.sh
+
