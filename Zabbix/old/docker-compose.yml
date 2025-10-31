@@ -1,0 +1,57 @@
+version: "3.8"
+
+services:
+  db:
+    image: postgres:13-alpine
+    container_name: zbx-postgres
+    restart: unless-stopped
+    environment:
+      - POSTGRES_USER=zabbix
+      - POSTGRES_PASSWORD=zabbix
+      - POSTGRES_DB=zabbix
+      - TZ=Asia/Tokyo
+    volumes:
+      - zbx_db:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U $$POSTGRES_USER -d $$POSTGRES_DB"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  zabbix-server:
+    image: zabbix/zabbix-server-pgsql:alpine-latest
+    container_name: zbx-server
+    restart: unless-stopped
+    environment:
+      - DB_SERVER_HOST=db
+      - POSTGRES_USER=zabbix
+      - POSTGRES_PASSWORD=zabbix
+      - POSTGRES_DB=zabbix
+      - TZ=Asia/Tokyo
+    depends_on:
+      db:
+        condition: service_healthy
+    ports:
+      - "10051:10051"
+
+  zabbix-web:
+    image: zabbix/zabbix-web-nginx-pgsql:alpine-latest
+    container_name: zbx-web
+    restart: unless-stopped
+    environment:
+      - DB_SERVER_HOST=db
+      - POSTGRES_USER=zabbix
+      - POSTGRES_PASSWORD=zabbix
+      - POSTGRES_DB=zabbix
+      - PHP_TZ=Asia/Tokyo
+      - ZBX_SERVER_HOST=zabbix-server
+    depends_on:
+      zabbix-server:
+        condition: service_started
+    ports:
+      - "8080:8080"  # Web UI (HTTP)
+      # - "8443:8443"  # Web UI (HTTPS) - enable if needed
+
+volumes:
+  zbx_db:
+

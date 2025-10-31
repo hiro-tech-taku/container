@@ -1,0 +1,13 @@
+FROM zabbix/zabbix-server-pgsql:alpine-latest
+
+# Optional defaults (override at runtime with -e ...)
+ENV TZ=Asia/Tokyo \
+    DB_SERVER_HOST=zbx-postgres \
+    POSTGRES_USER=zabbix \
+    POSTGRES_PASSWORD=zabbix \
+    POSTGRES_DB=zabbix
+
+EXPOSE 10051
+
+# Uses upstream entrypoint/cmd
+

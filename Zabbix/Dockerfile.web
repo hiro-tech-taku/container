@@ -1,0 +1,14 @@
+FROM zabbix/zabbix-web-nginx-pgsql:alpine-latest
+
+# Optional defaults (override at runtime with -e ...)
+ENV PHP_TZ=Asia/Tokyo \
+    DB_SERVER_HOST=zbx-postgres \
+    POSTGRES_USER=zabbix \
+    POSTGRES_PASSWORD=zabbix \
+    POSTGRES_DB=zabbix \
+    ZBX_SERVER_HOST=zbx-manager
+
+EXPOSE 8080 8443
+
+# Uses upstream entrypoint/cmd
+
